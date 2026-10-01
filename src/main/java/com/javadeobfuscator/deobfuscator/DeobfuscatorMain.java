@@ -28,12 +28,40 @@ import org.apache.commons.cli.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 
 public class DeobfuscatorMain {
     public static void main(String[] args) throws ClassNotFoundException {
-        System.exit(run(args));
+        boolean isGui = (args.length == 0 || hasGuiFlag(args)) && !hasConfigFlag(args) && !hasHelpFlag(args);
+        if (isGui && !GraphicsEnvironment.isHeadless()) {
+            com.javadeobfuscator.deobfuscator.ui.DeobfuscatorGUI.main(args);
+            return;
+        }
+        int code = run(args);
+        System.exit(code);
+    }
+
+    private static boolean hasGuiFlag(String[] args) {
+        for (String arg : args) {
+            if ("-g".equals(arg) || "--gui".equals(arg)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasConfigFlag(String[] args) {
+        for (String arg : args) {
+            if ("-c".equals(arg) || "--config".equals(arg)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasHelpFlag(String[] args) {
+        for (String arg : args) {
+            if ("-h".equals(arg) || "--help".equals(arg)) return true;
+        }
+        return false;
     }
 
     public static int run(String[] args) throws ClassNotFoundException {
@@ -41,6 +69,19 @@ public class DeobfuscatorMain {
 
         Options options = new Options();
         options.addOption("c", "config", true, "The configuration file to use");
+        options.addOption("g", "gui", false, "Launch the Graphical User Interface (GUI)");
+        options.addOption("h", "help", false, "Print help and usage information");
+        options.addOption("v", "version", false, "Print version information");
+
+        if (args.length == 0) {
+            if (!GraphicsEnvironment.isHeadless()) {
+                com.javadeobfuscator.deobfuscator.ui.DeobfuscatorGUI.main(args);
+                return 0;
+            } else {
+                printHelp(options);
+                return 0;
+            }
+        }
 
         CommandLineParser cmdlineParser = new DefaultParser();
         CommandLine cmdLine;
@@ -51,8 +92,28 @@ public class DeobfuscatorMain {
             return 1;
         }
 
+        if (cmdLine.hasOption("help")) {
+            printHelp(options);
+            return 0;
+        }
+
+        if (cmdLine.hasOption("version")) {
+            System.out.println("Java Deobfuscator v1.0.0 (ASM 9.7.1, Java 8-21+ JMOD Support)");
+            return 0;
+        }
+
+        if (cmdLine.hasOption("gui")) {
+            if (GraphicsEnvironment.isHeadless()) {
+                logger.error("Cannot launch GUI: No graphical display detected (headless environment). Use --config for CLI mode.");
+                return 1;
+            }
+            com.javadeobfuscator.deobfuscator.ui.DeobfuscatorGUI.main(args);
+            return 0;
+        }
+
         if (!cmdLine.hasOption("config")) {
-            logger.error("A config file must be specified");
+            logger.error("A config file must be specified (or use --gui / no args to start GUI, or --help for help)");
+            printHelp(options);
             return 2;
         }
 
@@ -130,5 +191,30 @@ public class DeobfuscatorMain {
             t.printStackTrace(System.out);
             return -1;
         }
+    }
+
+    private static void printHelp(Options options) {
+        System.out.println("Java Deobfuscator (with ASM 9.7.1 & Modern JDK Support)");
+        System.out.println("An easy-to-use, powerful Java bytecode deobfuscator.\n");
+        HelpFormatter formatter = new HelpFormatter();
+        formatter.printHelp("java -jar deobfuscator.jar [options]", options);
+        System.out.println("\nModes of Operation:");
+        System.out.println("  1. Graphical User Interface (GUI):");
+        System.out.println("     java -jar deobfuscator.jar");
+        System.out.println("     java -jar deobfuscator.jar --gui");
+        System.out.println("     ./run.sh (Linux/macOS) or run.bat (Windows)");
+        System.out.println();
+        System.out.println("  2. Command Line Interface (CLI):");
+        System.out.println("     java -Xss128m -jar deobfuscator.jar --config config.yaml");
+        System.out.println();
+        System.out.println("Required Variables & Environment Secrets:");
+        System.out.println("  • Java Runtime Library (-path):");
+        System.out.println("      Java 8:   rt.jar (e.g. $JAVA_HOME/jre/lib/rt.jar)");
+        System.out.println("      Java 9+:  jmods (e.g. $JAVA_HOME/jmods/java.base.jmod)");
+        System.out.println("      (The GUI auto-detects this across your installed JVMs!)");
+        System.out.println("  • Third-party Dependencies (-libraries):");
+        System.out.println("      Additional JAR libraries needed by your target application.");
+        System.out.println("  • Mapping Files (for remappers/normalizers):");
+        System.out.println("      Dictionaries or ProGuard/SRG mapping files when remapping names.");
     }
 }

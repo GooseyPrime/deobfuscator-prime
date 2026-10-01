@@ -126,7 +126,7 @@ public class Deobfuscator {
         Enumeration<? extends ZipEntry> entries = zipIn.entries();
         while (entries.hasMoreElements()) {
             ZipEntry ent = entries.nextElement();
-            if (ent.getName().endsWith(".class")) {
+            if (ent.getName().endsWith(".class") && !ent.getName().endsWith("module-info.class")) {
                 try {
                     ClassReader reader = new ClassReader(zipIn.getInputStream(ent));
                     ClassNode node = new ClassNode();
@@ -150,7 +150,7 @@ public class Deobfuscator {
                 if (file.isFile()) {
                     classpath.putAll(loadClasspathFile(file, true));
                 } else {
-                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar"));
+                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar") || child.getName().endsWith(".jmod"));
                     if (files != null) {
                         for (File child : files) {
                             classpath.putAll(loadClasspathFile(child, true));
@@ -164,7 +164,7 @@ public class Deobfuscator {
                 if (file.isFile()) {
                     libraries.putAll(loadClasspathFile(file, false));
                 } else {
-                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar"));
+                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar") || child.getName().endsWith(".jmod"));
                     if (files != null) {
                         for (File child : files) {
                             libraries.putAll(loadClasspathFile(child, false));

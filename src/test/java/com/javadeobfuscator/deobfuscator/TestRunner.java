@@ -32,12 +32,18 @@ public class TestRunner {
     public void setup() {
         try {
             File input = new File(System.getProperty("java.home") + File.separator + "lib" + File.separator + "rt.jar");
+            if (!input.exists()) {
+                input = new File(System.getProperty("java.home") + File.separator + "jmods" + File.separator + "java.base.jmod");
+            }
+            if (!input.exists()) {
+                return;
+            }
 
             ZipFile zipIn = new ZipFile(input);
             Enumeration<? extends ZipEntry> e = zipIn.entries();
             while (e.hasMoreElements()) {
                 ZipEntry next = e.nextElement();
-                if (next.getName().endsWith(".class")) {
+                if (next.getName().endsWith(".class") && !next.getName().endsWith("module-info.class")) {
                     try {
                         InputStream in = zipIn.getInputStream(next);
                         ClassReader reader = new ClassReader(in);
