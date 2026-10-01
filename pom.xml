@@ -6,7 +6,7 @@
     <version>1.0.0</version>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <version.asm>9.5</version.asm>
+        <version.asm>9.7.1</version.asm>
         <version.dude>1.10.2</version.dude>
     </properties>
     <build>
@@ -82,8 +82,8 @@
     </build>
     <repositories>
         <repository>
-            <id>java-deobfuscator-repository</id>
-            <url>https://repo.samczsun.com/repository/java-deobfuscator</url>
+            <id>project-local-repo</id>
+            <url>file://${project.basedir}/lib/repository</url>
         </repository>
         <repository>
             <id>jitpack.io</id>

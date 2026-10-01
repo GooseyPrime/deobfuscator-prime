@@ -16,9 +16,12 @@
 
 package com.javadeobfuscator.deobfuscator;
 
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Modifier;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.*;
@@ -28,6 +31,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import com.javadeobfuscator.deobfuscator.asm.ConstantPool;
@@ -122,24 +126,60 @@ public class Deobfuscator {
     private Map<String, ClassNode> loadClasspathFile(File file, boolean skipCode) throws IOException {
         Map<String, ClassNode> map = new HashMap<>();
 
-        ZipFile zipIn = new ZipFile(file);
-        Enumeration<? extends ZipEntry> entries = zipIn.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry ent = entries.nextElement();
-            if (ent.getName().endsWith(".class")) {
-                try {
-                    ClassReader reader = new ClassReader(zipIn.getInputStream(ent));
-                    ClassNode node = new ClassNode();
-                    reader.accept(node, (skipCode ? 0 : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-                    map.put(node.name, node);
+        boolean isJmod = false;
+        try (InputStream is = new FileInputStream(file)) {
+            byte[] header = new byte[4];
+            int r = is.read(header);
+            if (r == 4 && header[0] == 0x4A && header[1] == 0x4D && header[2] == 0x01 && header[3] == 0x00) {
+                isJmod = true;
+            }
+        }
 
-                    setConstantPool(node, new ConstantPool(reader));
-                } catch (Exception ex) {
-                    logger.warn("Could not load class " + ent.getName() + " from library " + file, ex);
+        if (isJmod) {
+            try (InputStream fis = new FileInputStream(file)) {
+                long skipped = fis.skip(4);
+                if (skipped == 4) {
+                    try (ZipInputStream zis = new ZipInputStream(new BufferedInputStream(fis))) {
+                        ZipEntry ent;
+                        while ((ent = zis.getNextEntry()) != null) {
+                            String name = ent.getName();
+                            if (name.endsWith(".class") && !name.endsWith("module-info.class")) {
+                                try {
+                                    byte[] data = IOUtils.toByteArray(zis);
+                                    ClassReader reader = new ClassReader(data);
+                                    ClassNode node = new ClassNode();
+                                    reader.accept(node, (skipCode ? ClassReader.SKIP_CODE : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                                    map.put(node.name, node);
+                                    setConstantPool(node, new ConstantPool(reader));
+                                } catch (Exception ex) {
+                                    logger.warn("Could not load class " + name + " from library " + file, ex);
+                                }
+                            }
+                            zis.closeEntry();
+                        }
+                    }
+                }
+            }
+        } else {
+            try (ZipFile zipIn = new ZipFile(file)) {
+                Enumeration<? extends ZipEntry> entries = zipIn.entries();
+                while (entries.hasMoreElements()) {
+                    ZipEntry ent = entries.nextElement();
+                    if (ent.getName().endsWith(".class") && !ent.getName().endsWith("module-info.class")) {
+                        try {
+                            ClassReader reader = new ClassReader(zipIn.getInputStream(ent));
+                            ClassNode node = new ClassNode();
+                            reader.accept(node, (skipCode ? ClassReader.SKIP_CODE : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                            map.put(node.name, node);
+
+                            setConstantPool(node, new ConstantPool(reader));
+                        } catch (Exception ex) {
+                            logger.warn("Could not load class " + ent.getName() + " from library " + file, ex);
+                        }
+                    }
                 }
             }
         }
-        zipIn.close();
 
         return map;
     }
@@ -150,7 +190,7 @@ public class Deobfuscator {
                 if (file.isFile()) {
                     classpath.putAll(loadClasspathFile(file, true));
                 } else {
-                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar"));
+                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar") || child.getName().endsWith(".jmod"));
                     if (files != null) {
                         for (File child : files) {
                             classpath.putAll(loadClasspathFile(child, true));
@@ -164,7 +204,7 @@ public class Deobfuscator {
                 if (file.isFile()) {
                     libraries.putAll(loadClasspathFile(file, false));
                 } else {
-                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar"));
+                    File[] files = file.listFiles(child -> child.getName().endsWith(".jar") || child.getName().endsWith(".jmod"));
                     if (files != null) {
                         for (File child : files) {
                             libraries.putAll(loadClasspathFile(child, false));
@@ -371,9 +411,11 @@ public class Deobfuscator {
     }
 
     public void start() throws Throwable {
+        checkCancelled();
         logger.info("Loading classpath");
         loadClasspath();
 
+        checkCancelled();
         logger.info("Loading input");
         loadInput();
 
@@ -430,11 +472,13 @@ public class Deobfuscator {
         logger.info("Transforming");
         if (configuration.getTransformers() != null) {
             for (TransformerConfig config : configuration.getTransformers()) {
+                checkCancelled();
                 logger.info("Running {}", config.getImplementation().getCanonicalName());
                 runFromConfig(config);
             }
         }
 
+        checkCancelled();
         logger.info("Writing");
         if (DEBUG) {
             classes.values().forEach(Utils::printClass);
@@ -468,12 +512,19 @@ public class Deobfuscator {
         zipOut.close();
     }
 
+    private void checkCancelled() throws InterruptedException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Deobfuscation cancelled");
+        }
+    }
+
     public boolean runFromConfig(TransformerConfig config) throws Throwable {
         Transformer<?> transformer = config.getImplementation().newInstance();
         transformer.init(this, config, classes, classpath, readers);
         boolean madeChangesAtLeastOnce = false;
         boolean madeChanges;
         do {
+            checkCancelled();
             madeChanges = transformer.transform();
             madeChangesAtLeastOnce = madeChangesAtLeastOnce || madeChanges;
         } while (madeChanges && getConfig().isSmartRedo());

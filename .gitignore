@@ -14,6 +14,7 @@ deobfuscator.iml
 /.idea
 *.iml
 *.jar
+!lib/**/*.jar
 *.txt
 *.ser
 *.DS_Store
