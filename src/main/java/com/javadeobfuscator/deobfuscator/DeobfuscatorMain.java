@@ -102,7 +102,7 @@ public class DeobfuscatorMain {
             return 0;
         }
 
-        if (cmdLine.hasOption("gui")) {
+        if (cmdLine.hasOption("gui") && !cmdLine.hasOption("config")) {
             if (GraphicsEnvironment.isHeadless()) {
                 logger.error("Cannot launch GUI: No graphical display detected (headless environment). Use --config for CLI mode.");
                 return 1;

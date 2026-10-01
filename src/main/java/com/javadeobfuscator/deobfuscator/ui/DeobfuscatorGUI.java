@@ -421,7 +421,7 @@ public class DeobfuscatorGUI extends JFrame {
         // --- 1. Java Runtime Library (rt.jar / jmods) ---
         JPanel runtimeGroup = new JPanel(new BorderLayout(6, 6));
         runtimeGroup.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createEtchedBorder(), "1. Java Runtime Library Path (rt.jar / jmods) *",
+                BorderFactory.createEtchedBorder(), "1. Java Runtime Library Paths (rt.jar / jmods) *",
                 TitledBorder.LEFT, TitledBorder.TOP, runtimeGroup.getFont().deriveFont(Font.BOLD)));
 
         JPanel runtimeInput = new JPanel(new BorderLayout(6, 4));
@@ -454,7 +454,8 @@ public class DeobfuscatorGUI extends JFrame {
                 "Where and how to get it:\n" +
                         "• Java 8: Located at <JDK_PATH>/jre/lib/rt.jar (Windows: C:\\Program Files\\Java\\jdk1.8.0_*\\jre\\lib\\rt.jar, Linux: /usr/lib/jvm/java-8-openjdk/jre/lib/rt.jar).\n" +
                         "• Modern Java (9, 11, 17, 21+): Located at <JDK_PATH>/jmods directory (containing java.base.jmod).\n" +
-                        "• Why needed: Java Deobfuscator requires standard Java class bytecode to calculate type inheritance and frame stacks. Without it, a NoClassInPathException will be thrown."
+                        "• Why needed: Java Deobfuscator requires standard Java class bytecode to calculate type inheritance and frame stacks. Without it, a NoClassInPathException will be thrown.\n" +
+                        "• Separate multiple runtime paths with '" + File.pathSeparator + "'."
         );
         runtimeHelp.setEditable(false);
         runtimeHelp.setBackground(runtimeGroup.getBackground());
@@ -1341,7 +1342,11 @@ public class DeobfuscatorGUI extends JFrame {
         }
 
         if (config.getPath() != null && !config.getPath().isEmpty()) {
-            runtimePathField.setText(config.getPath().get(0).getAbsolutePath());
+            StringJoiner paths = new StringJoiner(File.pathSeparator);
+            for (File path : config.getPath()) {
+                paths.add(path.getAbsolutePath());
+            }
+            runtimePathField.setText(paths.toString());
             updateRuntimeStatus();
         }
 
@@ -1391,7 +1396,12 @@ public class DeobfuscatorGUI extends JFrame {
         List<File> list = new ArrayList<>();
         String path = runtimePathField.getText().trim();
         if (!path.isEmpty()) {
-            list.add(new File(path));
+            for (String entry : path.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+                String trimmed = entry.trim();
+                if (!trimmed.isEmpty()) {
+                    list.add(new File(trimmed));
+                }
+            }
         }
         return list;
     }
