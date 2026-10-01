@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.Assert.assertTrue;
 
@@ -39,23 +40,56 @@ public class TestRunner {
                 return;
             }
 
-            ZipFile zipIn = new ZipFile(input);
-            Enumeration<? extends ZipEntry> e = zipIn.entries();
-            while (e.hasMoreElements()) {
-                ZipEntry next = e.nextElement();
-                if (next.getName().endsWith(".class") && !next.getName().endsWith("module-info.class")) {
-                    try {
-                        InputStream in = zipIn.getInputStream(next);
-                        ClassReader reader = new ClassReader(in);
-                        ClassNode node = new ClassNode();
-                        reader.accept(node, ClassReader.SKIP_FRAMES | ClassReader.SKIP_DEBUG);
-                        jre.put(node.name, node);
-                    } catch (IllegalArgumentException x) {
-                        System.out.println("Could not parse " + next.getName() + " (is it a class?)");
+            boolean isJmod = false;
+            try (InputStream is = new FileInputStream(input)) {
+                byte[] header = new byte[4];
+                int r = is.read(header);
+                if (r == 4 && header[0] == 0x4A && header[1] == 0x4D && header[2] == 0x01 && header[3] == 0x00) {
+                    isJmod = true;
+                }
+            }
+
+            if (isJmod) {
+                try (InputStream fis = new FileInputStream(input)) {
+                    long skipped = fis.skip(4);
+                    if (skipped == 4) {
+                        try (ZipInputStream zis = new ZipInputStream(new BufferedInputStream(fis))) {
+                            ZipEntry next;
+                            while ((next = zis.getNextEntry()) != null) {
+                                if (next.getName().endsWith(".class") && !next.getName().endsWith("module-info.class")) {
+                                    try {
+                                        byte[] data = IOUtils.toByteArray(zis);
+                                        ClassReader reader = new ClassReader(data);
+                                        ClassNode node = new ClassNode();
+                                        reader.accept(node, ClassReader.SKIP_FRAMES | ClassReader.SKIP_DEBUG);
+                                        jre.put(node.name, node);
+                                    } catch (IllegalArgumentException x) {
+                                        System.out.println("Could not parse " + next.getName() + " (is it a class?)");
+                                    }
+                                }
+                                zis.closeEntry();
+                            }
+                        }
+                    }
+                }
+            } else {
+                try (ZipFile zipIn = new ZipFile(input)) {
+                    Enumeration<? extends ZipEntry> e = zipIn.entries();
+                    while (e.hasMoreElements()) {
+                        ZipEntry next = e.nextElement();
+                        if (next.getName().endsWith(".class") && !next.getName().endsWith("module-info.class")) {
+                            try (InputStream in = zipIn.getInputStream(next)) {
+                                ClassReader reader = new ClassReader(in);
+                                ClassNode node = new ClassNode();
+                                reader.accept(node, ClassReader.SKIP_FRAMES | ClassReader.SKIP_DEBUG);
+                                jre.put(node.name, node);
+                            } catch (IllegalArgumentException x) {
+                                System.out.println("Could not parse " + next.getName() + " (is it a class?)");
+                            }
+                        }
                     }
                 }
             }
-            zipIn.close();
         } catch (IOException e) {
             e.printStackTrace(System.out);
         }

@@ -818,7 +818,7 @@ public class DeobfuscatorGUI extends JFrame {
             chooser.setDialogTitle("Save Log to File");
             chooser.setSelectedFile(new File("deobfuscator.log"));
             if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-                try (FileWriter writer = new FileWriter(chooser.getSelectedFile(), StandardCharsets.UTF_8)) {
+                try (Writer writer = new OutputStreamWriter(new FileOutputStream(chooser.getSelectedFile()), StandardCharsets.UTF_8)) {
                     writer.write(consoleArea.getText());
                     JOptionPane.showMessageDialog(this, "Log saved successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
                 } catch (IOException ex) {
@@ -1173,13 +1173,22 @@ public class DeobfuscatorGUI extends JFrame {
             private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
             @Override
-            public void write(int b) {
+            public synchronized void write(int b) {
                 if (b == '\n') {
                     String line = new String(buffer.toByteArray(), StandardCharsets.UTF_8);
                     buffer.reset();
                     SwingUtilities.invokeLater(() -> appendConsole(line));
                 } else {
                     buffer.write(b);
+                }
+            }
+
+            @Override
+            public synchronized void flush() {
+                if (buffer.size() > 0) {
+                    String line = new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+                    buffer.reset();
+                    SwingUtilities.invokeLater(() -> appendConsole(line));
                 }
             }
         };

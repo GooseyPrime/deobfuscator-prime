@@ -210,7 +210,7 @@ verify: true
 transformers:
   - com.javadeobfuscator.deobfuscator.transformers.allatori.StringEncryptionTransformer
   - com.javadeobfuscator.deobfuscator.transformers.allatori.FlowObfuscationTransformer
-  - com.javadeobfuscator.deobfuscator.transformers.peephole.PeepholeOptimizer
+  - com.javadeobfuscator.deobfuscator.transformers.general.peephole.PeepholeOptimizer
 ```
 
 Execute deobfuscation:
@@ -231,7 +231,7 @@ java -Xss128m -Xmx2G -jar target/deobfuscator-1.0.0.jar --config config.yaml
 | **Radon** | Flow, numbers, string pool, indy, trash classes | `radon.RadonTransformer`<br>`radon.RadonTransformerV2` |
 | **Smoke** | Number decryption, string obfuscation | `smoke.NumberObfuscationTransformer`<br>`smoke.StringEncryptionTransformer` |
 | **SkidSuite** | String encryption | `skidsuite.StringEncryptionTransformer` |
-| **General / Peephole** | Dead code, constant folding, peephole jumps | `peephole.PeepholeOptimizer`<br>`peephole.DeadCodeRemover`<br>`peephole.ConstantFolder` |
+| **General / Peephole** | Dead code, constant folding, peephole jumps | `general.peephole.PeepholeOptimizer`<br>`general.peephole.DeadCodeRemover`<br>`general.peephole.ConstantFolder` |
 | **Normalizers** | Source file, package, class, method, field naming | `normalizer.SourceFileNormalizer`<br>`normalizer.PackageNormalizer`<br>`normalizer.ClassNormalizer` |
 
 ---
