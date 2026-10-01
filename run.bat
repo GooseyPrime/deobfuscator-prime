@@ -19,10 +19,11 @@ if not exist "%JAR_FILE%" (
     echo [INFO] Shaded JAR not found. Building project with Maven...
     cd /d "%SCRIPT_DIR%"
     call mvn clean package -DskipTests
-    if %ERRORLEVEL% NEQ 0 (
+    if errorlevel 1 (
+        set "BUILD_ERROR=!ERRORLEVEL!"
         echo [ERROR] Maven build failed.
         pause
-        exit /b %ERRORLEVEL%
+        exit /b !BUILD_ERROR!
     )
 )
 

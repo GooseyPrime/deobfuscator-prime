@@ -66,7 +66,7 @@ public class ObfuscationDetectorService {
         configuration.setInput(inputJar);
         configuration.setPath(runtimePaths != null ? runtimePaths : Collections.emptyList());
         configuration.setLibraries(libraries != null ? libraries : Collections.emptyList());
-        configuration.setDetect(true);
+        configuration.setDetect(false);
 
         Deobfuscator deobfuscator = new Deobfuscator(configuration);
         // Load classpath and input

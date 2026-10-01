@@ -23,6 +23,7 @@ import com.javadeobfuscator.deobfuscator.Deobfuscator;
 import com.javadeobfuscator.deobfuscator.config.Configuration;
 import com.javadeobfuscator.deobfuscator.config.TransformerConfig;
 import com.javadeobfuscator.deobfuscator.config.TransformerConfigDeserializer;
+import com.javadeobfuscator.deobfuscator.config.TransformerConfigSerializer;
 import com.javadeobfuscator.deobfuscator.exceptions.NoClassInPathException;
 import com.javadeobfuscator.deobfuscator.exceptions.PreventableStackOverflowError;
 import com.javadeobfuscator.deobfuscator.transformers.Transformer;
@@ -94,6 +95,7 @@ public class DeobfuscatorGUI extends JFrame {
     private DefaultListModel<TransformerRegistry.TransformerItem> availableTransformersModel;
     private JList<TransformerRegistry.TransformerItem> availableTransformersList;
     private DefaultListModel<TransformerRegistry.TransformerItem> activeTransformersModel;
+    private List<TransformerConfig> loadedTransformerConfigs;
     private JList<TransformerRegistry.TransformerItem> activeTransformersList;
     private JComboBox<String> presetCombo;
 
@@ -1046,6 +1048,15 @@ public class DeobfuscatorGUI extends JFrame {
         }
 
         Configuration configuration = buildConfiguration();
+        if (configuration.getOutput().exists()) {
+            File backup = new File(configuration.getOutput().getParentFile(),
+                    configuration.getOutput().getName() + ".bak");
+            if (!configuration.getOutput().renameTo(backup)) {
+                JOptionPane.showMessageDialog(this, "Unable to back up the existing output JAR.",
+                        "Output Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+        }
 
         // Switch to console tab
         tabbedPane.setSelectedIndex(4);
@@ -1090,6 +1101,16 @@ public class DeobfuscatorGUI extends JFrame {
                     JOptionPane.showMessageDialog(this,
                             "Deobfuscation finished successfully!\nSaved to:\n" + configuration.getOutput().getAbsolutePath(),
                             "Complete", JOptionPane.INFORMATION_MESSAGE);
+                });
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                SwingUtilities.invokeLater(() -> {
+                    restoreSystemStreams();
+                    progressBar.setVisible(false);
+                    runBtn.setEnabled(true);
+                    stopBtn.setEnabled(false);
+                    statusLabel.setText("Cancelled");
+                    appendConsole("\n[WARNING] Deobfuscation was cancelled by user.");
                 });
             } catch (NoClassInPathException ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -1151,12 +1172,8 @@ public class DeobfuscatorGUI extends JFrame {
     private void cancelDeobfuscation() {
         if (runningThread != null && runningThread.isAlive()) {
             runningThread.interrupt();
-            restoreSystemStreams();
-            progressBar.setVisible(false);
-            runBtn.setEnabled(true);
-            stopBtn.setEnabled(false);
-            statusLabel.setText("Cancelled");
-            appendConsole("\n[WARNING] Deobfuscation was cancelled by user.");
+            statusLabel.setText("Cancelling...");
+            appendConsole("\n[WARNING] Cancellation requested; waiting for the worker to stop.");
         }
     }
 
@@ -1245,9 +1262,20 @@ public class DeobfuscatorGUI extends JFrame {
         File mappingFile = mappingPath.isEmpty() ? null : new File(mappingPath);
 
         List<TransformerConfig> transformerConfigs = new ArrayList<>();
+        boolean canReuseLoaded = loadedTransformerConfigs != null
+                && loadedTransformerConfigs.size() == activeTransformersModel.getSize();
+        if (canReuseLoaded) {
+            for (int i = 0; i < activeTransformersModel.getSize(); i++) {
+                String id = activeTransformersModel.getElementAt(i).getId();
+                if (!transformerId(loadedTransformerConfigs.get(i)).equals(id)) {
+                    canReuseLoaded = false;
+                    break;
+                }
+            }
+        }
         for (int i = 0; i < activeTransformersModel.getSize(); i++) {
-            TransformerRegistry.TransformerItem item = activeTransformersModel.getElementAt(i);
-            TransformerConfig tc = createTransformerConfig(item.getId(), mappingFile);
+            TransformerConfig tc = canReuseLoaded ? loadedTransformerConfigs.get(i)
+                    : createTransformerConfig(activeTransformersModel.getElementAt(i).getId(), mappingFile);
             if (tc != null) {
                 transformerConfigs.add(tc);
             }
@@ -1265,6 +1293,7 @@ public class DeobfuscatorGUI extends JFrame {
             if (!Transformer.class.isAssignableFrom(clazz)) {
                 return null;
             }
+
             @SuppressWarnings("rawtypes")
             Class<? extends Transformer> transClazz = clazz.asSubclass(Transformer.class);
 
@@ -1293,6 +1322,12 @@ public class DeobfuscatorGUI extends JFrame {
             LOGGER.error("Transformer class not found: {}", fullClass, e);
             return null;
         }
+    }
+
+    private String transformerId(TransformerConfig config) {
+        String name = config.getImplementation().getName();
+        String prefix = "com.javadeobfuscator.deobfuscator.transformers.";
+        return name.startsWith(prefix) ? name.substring(prefix.length()) : name;
     }
 
     public void loadFromConfiguration(Configuration config) {
@@ -1332,15 +1367,15 @@ public class DeobfuscatorGUI extends JFrame {
         paramorphismV2Box.setSelected(config.isParamorphismV2());
 
         activeTransformersModel.clear();
+        loadedTransformerConfigs = config.getTransformers() == null
+                ? null : new ArrayList<>(config.getTransformers());
         if (config.getTransformers() != null) {
             for (TransformerConfig tc : config.getTransformers()) {
                 if (tc.getImplementation() != null) {
-                    String name = tc.getImplementation().getName();
-                    String prefix = "com.javadeobfuscator.deobfuscator.transformers.";
-                    if (name.startsWith(prefix)) {
-                        name = name.substring(prefix.length());
+                    TransformerRegistry.TransformerItem item = TransformerRegistry.findById(transformerId(tc));
+                    if (item != null) {
+                        activeTransformersModel.addElement(item);
                     }
-                    activeTransformersModel.addElement(TransformerRegistry.findById(name));
                 }
                 if (tc instanceof AbstractNormalizer.Config) {
                     File mf = ((AbstractNormalizer.Config) tc).getMappingFile();
@@ -1376,6 +1411,7 @@ public class DeobfuscatorGUI extends JFrame {
         librariesModel.clear();
         ignoredClassesModel.clear();
         activeTransformersModel.clear();
+        loadedTransformerConfigs = null;
         verifyBox.setSelected(true);
         patchAsmBox.setSelected(false);
         smartRedoBox.setSelected(false);
@@ -1393,8 +1429,9 @@ public class DeobfuscatorGUI extends JFrame {
             File file = chooser.getSelectedFile();
             try {
                 ObjectMapper mapper = new ObjectMapper(new YAMLFactory())
-                        .registerModule(new SimpleModule().addDeserializer(TransformerConfig.class,
-                                new TransformerConfigDeserializer(LOGGER)));
+                        .registerModule(new SimpleModule()
+                                .addDeserializer(TransformerConfig.class, new TransformerConfigDeserializer(LOGGER))
+                                .addSerializer(TransformerConfig.class, new TransformerConfigSerializer()));
                 Configuration configuration = mapper.readValue(file, Configuration.class);
                 loadFromConfiguration(configuration);
                 JOptionPane.showMessageDialog(this, "Configuration loaded successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -1413,7 +1450,9 @@ public class DeobfuscatorGUI extends JFrame {
             File file = chooser.getSelectedFile();
             try {
                 Configuration config = buildConfiguration();
-                ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+                ObjectMapper mapper = new ObjectMapper(new YAMLFactory())
+                        .registerModule(new SimpleModule().addSerializer(TransformerConfig.class,
+                                new TransformerConfigSerializer()));
                 mapper.writeValue(file, config);
                 JOptionPane.showMessageDialog(this, "Configuration saved successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception ex) {

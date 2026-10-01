@@ -106,9 +106,9 @@ Java Deobfuscator requires specific runtime files and parameters depending on yo
 ### 3. Radon & Obfuscator Parameters
 * **Why it is needed**: Radon obfuscator utilizes dynamic invokedynamic decryption, number encryption, and branch pool obfuscation.
 * **Settings available in GUI**:
-  * **Flow Mode**: `NONE`, `LIGHT`, `NORMAL`
-  * **Number Mode**: `NONE`, `LIGHT`, `NORMAL`
-  * **String Pool Mode**: `NONE`, `CLEAN`
+  * **Flow Mode**: `NONE`, `LIGHT`, `NORMAL_OR_HEAVY`, `COMBINED`
+  * **Number Mode**: `NONE`, `LEGACY`, `NEW`
+  * **String Pool Mode**: `NONE`, `LEGACY`, `NEW`
   * **Flags**: `Enable Indy`, `Enable Fast Indy`, `Decrypt Strings`, `Clean Trash Classes`
 
 ### 4. JVM Stack Memory (`-Xss128m`)
@@ -226,13 +226,13 @@ java -Xss128m -Xmx2G -jar target/deobfuscator-1.0.0.jar --config config.yaml
 | :--- | :--- | :--- |
 | **Allatori** | String encryption, control flow, light flow | `allatori.StringEncryptionTransformer`<br>`allatori.FlowObfuscationTransformer` |
 | **Zelix KlassMaster (ZKM)** | String decryption, flow obfuscation, reflection | `zelix.StringEncryptionTransformer`<br>`zelix.FlowObfuscationTransformer`<br>`zelix.ReflectionObfuscationTransformer` |
-| **Stringer** | String hiding, invokedynamic decryption, hide-access | `stringer.v3.StringEncryptionTransformer`<br>`stringer.v3.InvokedynamicTransformer`<br>`stringer.v3.HideAccessObfuscationTransformer` |
+| **Stringer** | String hiding, invokedynamic decryption, hide-access | `stringer.v3.StringEncryptionTransformer`<br>`stringer.v3.InvokedynamicTransformer`<br>`stringer.v3.HideAccessTransformer` |
 | **Dash-O** | String encryption, flow obfuscation | `dasho.StringEncryptionTransformer`<br>`dasho.FlowObfuscationTransformer` |
-| **Radon** | Flow, numbers, string pool, indy, trash classes | `radon.RadonTransformer`<br>`radon.RadonTransformerV2` |
+| **Radon** | Flow, numbers, string pool, indy, trash classes | `special.RadonTransformer`<br>`special.RadonTransformerV2` |
 | **Smoke** | Number decryption, string obfuscation | `smoke.NumberObfuscationTransformer`<br>`smoke.StringEncryptionTransformer` |
-| **SkidSuite** | String encryption | `skidsuite.StringEncryptionTransformer` |
+| **SkidSuite** | String encryption | `skidsuite2.StringEncryptionTransformer` |
 | **General / Peephole** | Dead code, constant folding, peephole jumps | `general.peephole.PeepholeOptimizer`<br>`general.peephole.DeadCodeRemover`<br>`general.peephole.ConstantFolder` |
-| **Normalizers** | Source file, package, class, method, field naming | `normalizer.SourceFileNormalizer`<br>`normalizer.PackageNormalizer`<br>`normalizer.ClassNormalizer` |
+| **Normalizers** | Source file, package, class, method, field naming | `normalizer.SourceFileClassNormalizer`<br>`normalizer.PackageNormalizer`<br>`normalizer.ClassNormalizer` |
 
 ---
 
@@ -266,4 +266,3 @@ Alternatively, run in headless CLI mode using `--config config.yaml`.
 ## License
 
 Java Deobfuscator is licensed under the [Apache 2.0 License](LICENSE).
-

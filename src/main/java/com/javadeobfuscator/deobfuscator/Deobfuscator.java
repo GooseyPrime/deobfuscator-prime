@@ -148,7 +148,7 @@ public class Deobfuscator {
                                     byte[] data = IOUtils.toByteArray(zis);
                                     ClassReader reader = new ClassReader(data);
                                     ClassNode node = new ClassNode();
-                                    reader.accept(node, (skipCode ? 0 : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                                    reader.accept(node, (skipCode ? ClassReader.SKIP_CODE : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                                     map.put(node.name, node);
                                     setConstantPool(node, new ConstantPool(reader));
                                 } catch (Exception ex) {
@@ -169,7 +169,7 @@ public class Deobfuscator {
                         try {
                             ClassReader reader = new ClassReader(zipIn.getInputStream(ent));
                             ClassNode node = new ClassNode();
-                            reader.accept(node, (skipCode ? 0 : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                            reader.accept(node, (skipCode ? ClassReader.SKIP_CODE : 0) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                             map.put(node.name, node);
 
                             setConstantPool(node, new ConstantPool(reader));
@@ -411,9 +411,11 @@ public class Deobfuscator {
     }
 
     public void start() throws Throwable {
+        checkCancelled();
         logger.info("Loading classpath");
         loadClasspath();
 
+        checkCancelled();
         logger.info("Loading input");
         loadInput();
 
@@ -470,11 +472,13 @@ public class Deobfuscator {
         logger.info("Transforming");
         if (configuration.getTransformers() != null) {
             for (TransformerConfig config : configuration.getTransformers()) {
+                checkCancelled();
                 logger.info("Running {}", config.getImplementation().getCanonicalName());
                 runFromConfig(config);
             }
         }
 
+        checkCancelled();
         logger.info("Writing");
         if (DEBUG) {
             classes.values().forEach(Utils::printClass);
@@ -508,12 +512,19 @@ public class Deobfuscator {
         zipOut.close();
     }
 
+    private void checkCancelled() throws InterruptedException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Deobfuscation cancelled");
+        }
+    }
+
     public boolean runFromConfig(TransformerConfig config) throws Throwable {
         Transformer<?> transformer = config.getImplementation().newInstance();
         transformer.init(this, config, classes, classpath, readers);
         boolean madeChangesAtLeastOnce = false;
         boolean madeChanges;
         do {
+            checkCancelled();
             madeChanges = transformer.transform();
             madeChangesAtLeastOnce = madeChangesAtLeastOnce || madeChanges;
         } while (madeChanges && getConfig().isSmartRedo());
