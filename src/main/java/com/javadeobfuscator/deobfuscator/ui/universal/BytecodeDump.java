@@ -27,6 +27,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -76,6 +80,53 @@ public final class BytecodeDump {
 
     public static boolean sameBytecode(String left, String right) {
         return normalize(left).equals(normalize(right));
+    }
+
+    public static boolean sameBytecode(File left, File right) throws IOException {
+        if (left == null || right == null || !left.isFile() || !right.isFile()) {
+            return false;
+        }
+        return Arrays.equals(bytecodeDigest(left), bytecodeDigest(right));
+    }
+
+    private static byte[] bytecodeDigest(File file) throws IOException {
+        final MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IOException("SHA-256 is unavailable", ex);
+        }
+        int classes = 0;
+        if (isZip(file)) {
+            try (ZipFile zip = new ZipFile(file)) {
+                Enumeration<? extends ZipEntry> entries = zip.entries();
+                while (entries.hasMoreElements()) {
+                    ZipEntry entry = entries.nextElement();
+                    if (entry.isDirectory() || !entry.getName().endsWith(".class")) {
+                        continue;
+                    }
+                    try (InputStream in = zip.getInputStream(entry)) {
+                        updateClassDigest(digest, entry.getName(), in);
+                    }
+                    classes++;
+                }
+            }
+        } else {
+            try (InputStream in = new FileInputStream(file)) {
+                updateClassDigest(digest, file.getName(), in);
+                classes++;
+            }
+        }
+        if (classes == 0) {
+            digest.update("(no class files)".getBytes(StandardCharsets.UTF_8));
+        }
+        return digest.digest();
+    }
+
+    private static void updateClassDigest(MessageDigest digest, String name, InputStream in) throws IOException {
+        StringBuilder classDump = new StringBuilder();
+        appendClass(classDump, name, in);
+        digest.update(normalize(classDump.toString()).getBytes(StandardCharsets.UTF_8));
     }
 
     private static void appendClass(StringBuilder sb, String name, InputStream in) throws IOException {

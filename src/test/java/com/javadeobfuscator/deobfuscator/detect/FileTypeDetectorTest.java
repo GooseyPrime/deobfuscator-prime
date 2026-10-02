@@ -19,7 +19,10 @@ package com.javadeobfuscator.deobfuscator.detect;
 import com.javadeobfuscator.deobfuscator.samples.SyntheticFiles;
 import org.junit.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.Assert.assertEquals;
 
@@ -65,6 +68,17 @@ public class FileTypeDetectorTest {
     }
 
     @Test
+    public void nestedAndroidEntriesDoNotRouteAJavaArchiveToAndroid() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            addEntry(zip, "docs/AndroidManifest.xml", "<manifest/>".getBytes(StandardCharsets.UTF_8));
+            addEntry(zip, "assets/classes.dex", SyntheticFiles.dexMagic());
+            addEntry(zip, "sample/MadeUp.class", SyntheticFiles.classMagic());
+        }
+        assertEquals(DetectedFileType.JAVA, FileTypeDetector.detect(bytes.toByteArray(), "library.jar").getType());
+    }
+
+    @Test
     public void javascriptExtensionIsUsedWhenMagicIsAbsent() {
         byte[] script = "function a(){return 1;}".getBytes(StandardCharsets.UTF_8);
         assertEquals(DetectedFileType.JAVASCRIPT, FileTypeDetector.detect(script, "app.js").getType());
@@ -95,5 +109,11 @@ public class FileTypeDetectorTest {
     @Test
     public void emptyFileIsUnknown() {
         assertEquals(DetectedFileType.UNKNOWN, FileTypeDetector.detect(new byte[0], "empty.dat").getType());
+    }
+
+    private static void addEntry(ZipOutputStream zip, String name, byte[] data) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(data);
+        zip.closeEntry();
     }
 }

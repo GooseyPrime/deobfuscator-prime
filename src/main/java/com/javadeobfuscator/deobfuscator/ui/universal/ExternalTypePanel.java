@@ -60,6 +60,7 @@ final class ExternalTypePanel extends JPanel {
     private ResolvedTool resolved;
     private ExternalToolRunner runner;
     private SwingWorker<Void, String> worker;
+    private boolean jobActive;
 
     ExternalTypePanel(ExternalDeobfuscator backend, ToolSettings settings) {
         super(new BorderLayout(8, 8));
@@ -73,6 +74,11 @@ final class ExternalTypePanel extends JPanel {
     }
 
     void acceptFile(File file, FileTypeDetection detection, boolean autoRun) {
+        if (jobActive) {
+            setStatus(new JobStatus(detectionLabel(), "none", backend.title(),
+                    false, false, false, null, "An external job is already running. Wait for it to finish before loading another file."));
+            return;
+        }
         this.input = file;
         this.detection = detection;
         inputLabel.setText("Input: " + file.getAbsolutePath());
@@ -181,9 +187,6 @@ final class ExternalTypePanel extends JPanel {
                 if (runner != null) {
                     runner.cancel();
                 }
-                if (worker != null) {
-                    worker.cancel(true);
-                }
             }
         });
         progress.setIndeterminate(false);
@@ -253,7 +256,7 @@ final class ExternalTypePanel extends JPanel {
     }
 
     private void refreshAvailability() {
-        resolved = backend.resolve(settings);
+        resolved = backend.resolve(settings, input, detection);
         installArea.setText(resolved.getMessage() + "\n\n" + backend.installInstructions());
         installArea.setCaretPosition(0);
         if (resolved.getMode() == ResolvedTool.Mode.MISSING) {
@@ -263,11 +266,11 @@ final class ExternalTypePanel extends JPanel {
         } else if (resolved.getMode() == ResolvedTool.Mode.MANUAL_ONLY) {
             availabilityLabel.setText("Manual only: " + resolved.getToolName() + " can be invoked. Nothing has run yet.");
             availabilityLabel.setForeground(new Color(140, 90, 0));
-            runButton.setEnabled(input != null);
+            runButton.setEnabled(input != null && !jobActive);
         } else {
             availabilityLabel.setText("Available: " + resolved.getMessage());
             availabilityLabel.setForeground(new Color(0, 110, 40));
-            runButton.setEnabled(input != null);
+            runButton.setEnabled(input != null && !jobActive);
         }
         if (input == null) {
             showIdleStatus();
@@ -285,6 +288,9 @@ final class ExternalTypePanel extends JPanel {
     }
 
     private void startRun() {
+        if (jobActive) {
+            return;
+        }
         if (input == null) {
             setStatus(new JobStatus(backend.title(), "none", backend.title(),
                     false, false, false, null, "No input file."));
@@ -309,10 +315,14 @@ final class ExternalTypePanel extends JPanel {
         cancelButton.setEnabled(true);
         progress.setVisible(true);
         progress.setIndeterminate(true);
+        jobActive = true;
         logArea.setText("");
         appendLog("Command: " + join(command));
+        final File runInput = input;
+        final String runDetectionLabel = detectionLabel();
         final ResolvedTool tool = resolved;
-        runner = new ExternalToolRunner();
+        final ExternalToolRunner runRunner = new ExternalToolRunner();
+        runner = runRunner;
         worker = new SwingWorker<Void, String>() {
             private int exitCode = -1;
             private String failure;
@@ -320,7 +330,7 @@ final class ExternalTypePanel extends JPanel {
             @Override
             protected Void doInBackground() {
                 try {
-                    exitCode = runner.run(command, new java.util.function.Consumer<String>() {
+                    exitCode = runRunner.run(command, new java.util.function.Consumer<String>() {
                         @Override
                         public void accept(String line) {
                             publish(line);
@@ -345,6 +355,8 @@ final class ExternalTypePanel extends JPanel {
                 progress.setVisible(false);
                 progress.setIndeterminate(false);
                 cancelButton.setEnabled(false);
+                runner = null;
+                jobActive = false;
                 runButton.setEnabled(resolved != null && resolved.canRun() && input != null);
                 boolean ran = failure == null;
                 boolean success = ran && exitCode == 0 && output.exists();
@@ -352,7 +364,7 @@ final class ExternalTypePanel extends JPanel {
                 String detail = failure == null ? "Exit code " + exitCode + "." : failure;
                 if (success) {
                     try {
-                        changed = backend.outputChanged(input, output);
+                        changed = backend.outputChanged(runInput, output);
                     } catch (Exception ex) {
                         success = false;
                         detail = "Output could not be compared: " + ex.getMessage();
@@ -363,7 +375,7 @@ final class ExternalTypePanel extends JPanel {
                     detail = "The process exited 0 but did not create " + output.getAbsolutePath();
                 }
                 try {
-                    ViewerPages pages = backend.loadViewer(input, output, success && output.exists());
+                    ViewerPages pages = backend.loadViewer(runInput, output, success && output.exists());
                     originalArea.setText(pages.getLeftText());
                     originalArea.setCaretPosition(0);
                     resultArea.setText(pages.getRightText());
@@ -371,7 +383,7 @@ final class ExternalTypePanel extends JPanel {
                 } catch (Exception ex) {
                     resultArea.setText("Could not read the output: " + ex.getMessage());
                 }
-                setStatus(new JobStatus(detectionLabel(), "none (external tool does not report a guess unless its log does)",
+                setStatus(new JobStatus(runDetectionLabel, "none (external tool does not report a guess unless its log does)",
                         tool.getToolName(), ran, success, changed, output.exists() ? output : null, detail));
             }
         };

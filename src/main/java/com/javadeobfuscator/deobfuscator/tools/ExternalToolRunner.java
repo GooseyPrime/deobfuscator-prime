@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -29,6 +30,17 @@ public final class ExternalToolRunner {
     public static final long DEFAULT_TIMEOUT_MINUTES = 5L;
 
     private volatile Process process;
+    private final long timeout;
+    private final TimeUnit timeoutUnit;
+
+    public ExternalToolRunner() {
+        this(DEFAULT_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+    }
+
+    ExternalToolRunner(long timeout, TimeUnit timeoutUnit) {
+        this.timeout = timeout;
+        this.timeoutUnit = timeoutUnit;
+    }
 
     public int run(List<String> command, Consumer<String> lineConsumer) throws IOException, InterruptedException {
         if (command == null || command.isEmpty()) {
@@ -38,22 +50,68 @@ public final class ExternalToolRunner {
         builder.redirectErrorStream(true);
         Process started = builder.start();
         this.process = started;
-        StringBuilder captured = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                captured.append(line).append('\n');
-                if (lineConsumer != null) {
-                    lineConsumer.accept(line);
+        AtomicReference<Throwable> readerFailure = new AtomicReference<Throwable>();
+        Thread outputReader = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (lineConsumer != null) {
+                            lineConsumer.accept(line);
+                        }
+                    }
+                } catch (IOException | RuntimeException ex) {
+                    readerFailure.set(ex);
                 }
             }
+        }, "ExternalTool-OutputReader");
+        outputReader.setDaemon(true);
+        outputReader.start();
+        long deadline = System.nanoTime() + timeoutUnit.toNanos(timeout);
+        boolean finished;
+        try {
+            finished = started.waitFor(timeout, timeoutUnit);
+        } catch (InterruptedException ex) {
+            started.destroyForcibly();
+            closeOutput(started);
+            outputReader.interrupt();
+            outputReader.join(1000L);
+            throw ex;
         }
-        boolean finished = started.waitFor(DEFAULT_TIMEOUT_MINUTES, TimeUnit.MINUTES);
         if (!finished) {
             started.destroyForcibly();
-            throw new IOException("Timed out after " + DEFAULT_TIMEOUT_MINUTES + " minutes.");
+            closeOutput(started);
+            outputReader.join(1000L);
+            throw new IOException("Timed out after " + timeout + " " + timeoutUnit.toString().toLowerCase() + ".");
+        }
+        long remaining = deadline - System.nanoTime();
+        if (remaining > 0) {
+            long waitMillis = TimeUnit.NANOSECONDS.toMillis(remaining);
+            int waitNanos = (int) (remaining - TimeUnit.MILLISECONDS.toNanos(waitMillis));
+            outputReader.join(waitMillis, waitNanos);
+        }
+        if (outputReader.isAlive()) {
+            closeOutput(started);
+            outputReader.join(1000L);
+            throw new IOException("Timed out after " + timeout + " " + timeoutUnit.toString().toLowerCase() + ".");
+        }
+        Throwable failure = readerFailure.get();
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure != null) {
+            throw new IOException("Could not process external tool output.", failure);
         }
         return started.exitValue();
+    }
+
+    private static void closeOutput(Process process) {
+        try {
+            process.getInputStream().close();
+        } catch (IOException ignored) {
+        }
     }
 
     public void cancel() {

@@ -122,6 +122,7 @@ public class DeobfuscatorGUI extends JPanel {
 
     // Threading / execution state
     private Thread runningThread;
+    private boolean runActive;
     private PrintStream originalOut;
     private PrintStream originalErr;
 
@@ -1005,6 +1006,11 @@ public class DeobfuscatorGUI extends JPanel {
     // Execution: Start / Stop
     // =========================================================================
     private void startDeobfuscation() {
+        if (runActive) {
+            notifyUser("A Java deobfuscation is already running. Wait for it to finish before starting another.",
+                    "Java Run Active", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         String inputPath = inputJarField.getText().trim();
         String outputPath = outputJarField.getText().trim();
 
@@ -1100,6 +1106,7 @@ public class DeobfuscatorGUI extends JPanel {
         progressBar.setVisible(true);
         progressBar.setIndeterminate(true);
         statusLabel.setText("Deobfuscating...");
+        runActive = true;
 
         redirectSystemStreams();
 
@@ -1112,6 +1119,7 @@ public class DeobfuscatorGUI extends JPanel {
                 long elapsed = System.currentTimeMillis() - start;
                 SwingUtilities.invokeLater(() -> {
                     restoreSystemStreams();
+                    runActive = false;
                     progressBar.setVisible(false);
                     runBtn.setEnabled(true);
                     stopBtn.setEnabled(false);
@@ -1135,6 +1143,7 @@ public class DeobfuscatorGUI extends JPanel {
                 Thread.currentThread().interrupt();
                 SwingUtilities.invokeLater(() -> {
                     restoreSystemStreams();
+                    runActive = false;
                     progressBar.setVisible(false);
                     runBtn.setEnabled(true);
                     stopBtn.setEnabled(false);
@@ -1146,6 +1155,7 @@ public class DeobfuscatorGUI extends JPanel {
             } catch (NoClassInPathException ex) {
                 SwingUtilities.invokeLater(() -> {
                     restoreSystemStreams();
+                    runActive = false;
                     progressBar.setVisible(false);
                     runBtn.setEnabled(true);
                     stopBtn.setEnabled(false);
@@ -1167,6 +1177,7 @@ public class DeobfuscatorGUI extends JPanel {
             } catch (PreventableStackOverflowError ex) {
                 SwingUtilities.invokeLater(() -> {
                     restoreSystemStreams();
+                    runActive = false;
                     progressBar.setVisible(false);
                     runBtn.setEnabled(true);
                     stopBtn.setEnabled(false);
@@ -1183,6 +1194,7 @@ public class DeobfuscatorGUI extends JPanel {
             } catch (Throwable t) {
                 SwingUtilities.invokeLater(() -> {
                     restoreSystemStreams();
+                    runActive = false;
                     progressBar.setVisible(false);
                     runBtn.setEnabled(true);
                     stopBtn.setEnabled(false);
@@ -1561,6 +1573,10 @@ public class DeobfuscatorGUI extends JPanel {
      * packed into a new jar under out/ so the existing engine can read it.
      */
     public void acceptRoutedFile(File input, FileTypeDetection detection) {
+        if (runActive) {
+            appendConsole("A Java deobfuscation is already running. The new file was not started.");
+            return;
+        }
         quietDialogs = true;
         routedTypeSummary = detection.getType().getDisplayName() + " — " + detection.getSummary();
         obfuscatorGuess = "not scanned";
@@ -1643,7 +1659,7 @@ public class DeobfuscatorGUI extends JPanel {
         if (failure == null && wroteOutput) {
             try {
                 transformed = BytecodeDump.dump(output);
-                changed = !BytecodeDump.sameBytecode(original, transformed);
+                changed = !BytecodeDump.sameBytecode(input, output);
             } catch (IOException ex) {
                 failure = ex.getMessage();
                 transformed = "Could not read output: " + ex.getMessage();

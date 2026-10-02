@@ -16,6 +16,8 @@
 
 package com.javadeobfuscator.deobfuscator.tools;
 
+import com.javadeobfuscator.deobfuscator.detect.FileTypeDetection;
+
 import java.io.File;
 import java.util.List;
 
@@ -32,6 +34,10 @@ public interface ExternalDeobfuscator {
     String installInstructions();
 
     ResolvedTool resolve(ToolSettings settings);
+
+    default ResolvedTool resolve(ToolSettings settings, File input, FileTypeDetection detection) {
+        return resolve(settings);
+    }
 
     File outputFor(ResolvedTool tool, File input);
 

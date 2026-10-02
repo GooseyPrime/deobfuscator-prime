@@ -16,16 +16,23 @@
 
 package com.javadeobfuscator.deobfuscator.tools;
 
+import com.javadeobfuscator.deobfuscator.detect.FileTypeDetection;
+import com.javadeobfuscator.deobfuscator.detect.FileTypeDetector;
+import com.javadeobfuscator.deobfuscator.samples.SyntheticFiles;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeFalse;
 
 public class ExternalToolResolutionTest {
     @Test
@@ -33,9 +40,36 @@ public class ExternalToolResolutionTest {
         File dir = Files.createTempDirectory("tool-path").toFile();
         File tool = new File(dir, "webcrack");
         Files.write(tool.toPath(), "#!/bin/sh\n".getBytes(StandardCharsets.UTF_8));
+        if (!ToolLocator.isWindows()) {
+            assertTrue(tool.setExecutable(true));
+        }
         File found = ToolLocator.searchPath(dir.getAbsolutePath(), "webcrack");
         assertEquals(tool.getAbsolutePath(), found.getAbsolutePath());
         assertEquals(null, ToolLocator.searchPath(dir.getAbsolutePath(), "missing-tool"));
+    }
+
+    @Test
+    public void pathSearchIgnoresNonExecutableFilesOnPosix() throws Exception {
+        assumeFalse(ToolLocator.isWindows());
+        File dir = Files.createTempDirectory("tool-path-nonexec").toFile();
+        File tool = new File(dir, "jadx");
+        Files.write(tool.toPath(), "#!/bin/sh\n".getBytes(StandardCharsets.UTF_8));
+        assertTrue(tool.setExecutable(false));
+        assertEquals(null, ToolLocator.searchPath(dir.getAbsolutePath(), "jadx"));
+    }
+
+    @Test
+    public void externalToolTimeoutDoesNotWaitForStdoutToClose() throws Exception {
+        assumeFalse(ToolLocator.isWindows());
+        long start = System.nanoTime();
+        try {
+            new ExternalToolRunner(100, TimeUnit.MILLISECONDS)
+                    .run(java.util.Arrays.asList("sh", "-c", "exec sleep 5"), null);
+            fail("Expected timeout");
+        } catch (IOException ex) {
+            assertTrue(ex.getMessage().contains("Timed out"));
+            assertTrue(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - start) < 3);
+        }
     }
 
     @Test
@@ -111,5 +145,32 @@ public class ExternalToolResolutionTest {
         assertEquals("d", apktoolCommand.get(1));
         assertEquals("-f", apktoolCommand.get(2));
         assertEquals("-o", apktoolCommand.get(3));
+    }
+
+    @Test
+    public void apktoolIsNotReadyForStandaloneDex() throws Exception {
+        File dir = Files.createTempDirectory("android-dex-tools").toFile();
+        File apktool = new File(dir, "apktool");
+        assertTrue(apktool.createNewFile());
+        ToolSettings settings = new ToolSettings(new File(dir, "tools.properties"));
+        settings.set(AndroidTools.KEY_APKTOOL, apktool.getAbsolutePath());
+        FileTypeDetection dex = FileTypeDetector.detect(SyntheticFiles.dexMagic(), "classes.dex");
+        ResolvedTool resolved = new AndroidTools().resolve(settings, null, dex);
+        assertEquals(ResolvedTool.Mode.MISSING, resolved.getMode());
+        assertTrue(resolved.getMessage().contains("jadx is required"));
+    }
+
+    @Test
+    public void javascriptChangeDetectionComparesBeyondThePreviewLimit() throws Exception {
+        File dir = Files.createTempDirectory("javascript-full-compare").toFile();
+        File input = new File(dir, "input.js");
+        File output = new File(dir, "output.js");
+        byte[] original = new byte[2_000_001];
+        byte[] changed = new byte[2_000_001];
+        original[original.length - 1] = 'a';
+        changed[changed.length - 1] = 'b';
+        Files.write(input.toPath(), original);
+        Files.write(output.toPath(), changed);
+        assertTrue(new JavaScriptTools().outputChanged(input, output));
     }
 }

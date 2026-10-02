@@ -142,7 +142,6 @@ public final class JavaScriptTools implements ExternalDeobfuscator {
         if (output == null || !output.exists() || input == null || !input.isFile()) {
             return false;
         }
-        String original = TextPreview.readText(input);
         if (output.isDirectory()) {
             if (!TextPreview.directoryHasFiles(output)) {
                 return false;
@@ -151,9 +150,9 @@ public final class JavaScriptTools implements ExternalDeobfuscator {
             if (primary == null) {
                 return true;
             }
-            return TextPreview.textDiffers(original, TextPreview.readText(primary));
+            return TextPreview.bytesDiffer(input, primary);
         }
-        return TextPreview.textDiffers(original, TextPreview.readText(output));
+        return TextPreview.bytesDiffer(input, output);
     }
 
     private static ResolvedTool configured(String name, String path) {

@@ -234,15 +234,15 @@ public final class FileTypeDetector {
             return false;
         }
         String normalized = name.replace('\\', '/');
-        int slash = normalized.lastIndexOf('/');
-        String base = slash >= 0 ? normalized.substring(slash + 1) : normalized;
-        if ("AndroidManifest.xml".equals(base)) {
+        if ("AndroidManifest.xml".equals(normalized)) {
             return true;
         }
-        if ("classes.dex".equals(base)) {
+        if ("classes.dex".equals(normalized)) {
             return true;
         }
-        return base.startsWith("classes") && base.endsWith(".dex") && base.length() > "classes.dex".length();
+        return normalized.startsWith("classes") && normalized.endsWith(".dex")
+                && normalized.length() > "classes.dex".length()
+                && normalized.indexOf('/') < 0;
     }
 
     /**

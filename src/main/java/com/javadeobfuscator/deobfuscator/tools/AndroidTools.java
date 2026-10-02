@@ -16,6 +16,10 @@
 
 package com.javadeobfuscator.deobfuscator.tools;
 
+import com.javadeobfuscator.deobfuscator.detect.DetectedFileType;
+import com.javadeobfuscator.deobfuscator.detect.FileTypeDetection;
+import com.javadeobfuscator.deobfuscator.detect.FileTypeDetector;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -66,17 +70,34 @@ public final class AndroidTools implements ExternalDeobfuscator {
 
     @Override
     public ResolvedTool resolve(ToolSettings settings) {
+        return resolve(settings, null, null);
+    }
+
+    @Override
+    public ResolvedTool resolve(ToolSettings settings, File input, FileTypeDetection detection) {
+        boolean dexInput = detection != null
+                ? detection.getType() == DetectedFileType.ANDROID && "Android DEX".equals(detection.getSummary())
+                : input != null && "Android DEX".equals(FileTypeDetector.detect(input).getSummary());
         String jadxPath = settings.get(KEY_JADX).trim();
         if (!jadxPath.isEmpty()) {
             return configured(JADX, jadxPath);
         }
+        File jadx = ToolLocator.findOnPath("jadx", "jadx.bat", "jadx.cmd");
         String apktoolPath = settings.get(KEY_APKTOOL).trim();
         if (!apktoolPath.isEmpty()) {
+            if (dexInput) {
+                if (jadx != null) {
+                    return ResolvedTool.ready(JADX, jadx, "Found jadx on PATH: " + jadx.getAbsolutePath());
+                }
+                return ResolvedTool.missing(JADX, "jadx is required to decompile standalone DEX files; apktool only supports APK/JAR packages.");
+            }
             return configured(APKTOOL, apktoolPath);
         }
-        File jadx = ToolLocator.findOnPath("jadx", "jadx.bat", "jadx.cmd");
         if (jadx != null) {
             return ResolvedTool.ready(JADX, jadx, "Found jadx on PATH: " + jadx.getAbsolutePath());
+        }
+        if (dexInput) {
+            return ResolvedTool.missing(JADX, "jadx is required to decompile standalone DEX files; apktool only supports APK/JAR packages.");
         }
         File apktool = ToolLocator.findOnPath("apktool", "apktool.bat", "apktool.cmd");
         if (apktool != null) {

@@ -40,7 +40,7 @@ public final class ToolLocator {
                     continue;
                 }
                 File candidate = new File(dir, name);
-                if (candidate.isFile()) {
+                if (candidate.isFile() && (isWindows() || candidate.canExecute())) {
                     return candidate;
                 }
             }
@@ -50,6 +50,6 @@ public final class ToolLocator {
 
     public static boolean isWindows() {
         String os = System.getProperty("os.name", "");
-        return os.toLowerCase().contains("win");
+        return os.toLowerCase(java.util.Locale.ROOT).startsWith("windows");
     }
 }
