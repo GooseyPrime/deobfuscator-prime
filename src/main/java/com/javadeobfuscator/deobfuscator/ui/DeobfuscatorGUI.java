@@ -29,9 +29,14 @@ import com.javadeobfuscator.deobfuscator.exceptions.PreventableStackOverflowErro
 import com.javadeobfuscator.deobfuscator.transformers.Transformer;
 import com.javadeobfuscator.deobfuscator.transformers.normalizer.AbstractNormalizer;
 import com.javadeobfuscator.deobfuscator.transformers.special.RadonConfig;
+import com.javadeobfuscator.deobfuscator.detect.FileTypeDetection;
+import com.javadeobfuscator.deobfuscator.tools.ClassFilePackager;
+import com.javadeobfuscator.deobfuscator.tools.JobStatus;
+import com.javadeobfuscator.deobfuscator.tools.OutputLocations;
 import com.javadeobfuscator.deobfuscator.transformers.special.RadonTransformer;
 import com.javadeobfuscator.deobfuscator.transformers.special.RadonTransformerV2;
 import com.javadeobfuscator.deobfuscator.transformers.special.RadonV2Config;
+import com.javadeobfuscator.deobfuscator.ui.universal.BytecodeDump;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +56,7 @@ import java.util.List;
  * Supports configuration of end-user variables, secrets, classpath,
  * obfuscator detection, and real-time execution monitoring.
  */
-public class DeobfuscatorGUI extends JFrame {
+public class DeobfuscatorGUI extends JPanel {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DeobfuscatorGUI.class);
 
@@ -106,52 +111,44 @@ public class DeobfuscatorGUI extends JFrame {
     private JButton runBtn;
     private JButton stopBtn;
 
+    // --- Tab 6: Result view ---
+    private JTextArea resultStatusArea;
+    private JTextArea originalViewArea;
+    private JTextArea transformedViewArea;
+    private boolean quietDialogs;
+    private String routedTypeSummary = "";
+    private String obfuscatorGuess = "not scanned";
+    private Runnable runSettledCallback;
+
     // Threading / execution state
     private Thread runningThread;
     private PrintStream originalOut;
     private PrintStream originalErr;
 
     public DeobfuscatorGUI() {
-        super("Java Deobfuscator - Bytecode Analysis & Recovery Suite");
+        super(new BorderLayout(0, 5));
+        setBorder(new EmptyBorder(6, 8, 6, 8));
         initUI();
     }
 
     private void initUI() {
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1000, 720);
-        setMinimumSize(new Dimension(840, 600));
-        setLocationRelativeTo(null);
+        JPanel north = new JPanel(new BorderLayout());
+        north.add(createMenuBar(), BorderLayout.NORTH);
+        north.add(createHeaderPanel(), BorderLayout.CENTER);
+        add(north, BorderLayout.NORTH);
 
-        // Try to set system look and feel
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception ignored) {
-        }
-
-        setJMenuBar(createMenuBar());
-
-        JPanel root = new JPanel(new BorderLayout(0, 5));
-        root.setBorder(new EmptyBorder(6, 8, 6, 8));
-
-        // Header Banner
-        root.add(createHeaderPanel(), BorderLayout.NORTH);
-
-        // Center Tabs
         tabbedPane = new JTabbedPane();
         tabbedPane.setFont(tabbedPane.getFont().deriveFont(Font.BOLD, 12f));
-        tabbedPane.addTab("📁 Target Files", createTargetFilesTab());
-        tabbedPane.addTab("🔑 Variables & Secrets", createVariablesAndSecretsTab());
-        tabbedPane.addTab("📚 Classpath & Libs", createClasspathTab());
-        tabbedPane.addTab("⚡ Transformers", createTransformersTab());
-        tabbedPane.addTab("🖥️ Console Log", createConsoleTab());
-        root.add(tabbedPane, BorderLayout.CENTER);
+        tabbedPane.addTab("Target Files", createTargetFilesTab());
+        tabbedPane.addTab("Variables & Secrets", createVariablesAndSecretsTab());
+        tabbedPane.addTab("Classpath & Libs", createClasspathTab());
+        tabbedPane.addTab("Transformers", createTransformersTab());
+        tabbedPane.addTab("Console Log", createConsoleTab());
+        tabbedPane.addTab("Result", createResultTab());
+        add(tabbedPane, BorderLayout.CENTER);
 
-        // Bottom Action Bar
-        root.add(createBottomBar(), BorderLayout.SOUTH);
+        add(createBottomBar(), BorderLayout.SOUTH);
 
-        setContentPane(root);
-
-        // Auto-detect runtime on startup in background
         SwingUtilities.invokeLater(this::performAutoDetectRuntimeQuietly);
     }
 
@@ -278,12 +275,7 @@ public class DeobfuscatorGUI extends JFrame {
                 inputJarField.setText(selected.getAbsolutePath());
                 // Auto-suggest output JAR if output is currently empty
                 if (outputJarField.getText().trim().isEmpty()) {
-                    String path = selected.getAbsolutePath();
-                    if (path.toLowerCase().endsWith(".jar")) {
-                        outputJarField.setText(path.substring(0, path.length() - 4) + "-deobfuscated.jar");
-                    } else {
-                        outputJarField.setText(path + "-deobfuscated.jar");
-                    }
+                    outputJarField.setText(OutputLocations.jarOutput(selected).getAbsolutePath());
                 }
             }
         });
@@ -961,6 +953,7 @@ public class DeobfuscatorGUI extends JFrame {
                 try {
                     List<ObfuscationDetectorService.DetectionResult> results = get();
                     if (results.isEmpty()) {
+                        obfuscatorGuess = "none detected";
                         JOptionPane.showMessageDialog(DeobfuscatorGUI.this,
                                 "No known obfuscators were detected on this file.\n" +
                                         "(Note: Name obfuscation alone without string/flow encryption may not trigger detectors).",
@@ -969,11 +962,17 @@ public class DeobfuscatorGUI extends JFrame {
                         StringBuilder sb = new StringBuilder();
                         sb.append("Detected ").append(results.size()).append(" obfuscator signatures:\n\n");
                         Set<String> recommendedIds = new LinkedHashSet<>();
+                        StringBuilder guess = new StringBuilder();
                         for (ObfuscationDetectorService.DetectionResult res : results) {
+                            if (guess.length() > 0) {
+                                guess.append(", ");
+                            }
+                            guess.append(res.getRuleName());
                             sb.append("• ").append(res.getRuleName()).append(": ").append(res.getDescription()).append("\n");
                             sb.append("  Details: ").append(res.getMessage()).append("\n\n");
                             recommendedIds.addAll(res.getRecommendedTransformerIds());
                         }
+                        obfuscatorGuess = guess.length() == 0 ? "none detected" : guess.toString();
 
                         if (!recommendedIds.isEmpty()) {
                             sb.append("Recommended Transformers to apply:\n");
@@ -1010,41 +1009,64 @@ public class DeobfuscatorGUI extends JFrame {
         String outputPath = outputJarField.getText().trim();
 
         if (inputPath.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select an Input JAR file.", "Missing Input", JOptionPane.WARNING_MESSAGE);
+            notifyUser("Please select an Input JAR file.", "Missing Input", JOptionPane.WARNING_MESSAGE);
             tabbedPane.setSelectedIndex(0);
+            fireSettled();
             return;
         }
         if (!new File(inputPath).exists()) {
-            JOptionPane.showMessageDialog(this, "Input JAR does not exist: " + inputPath, "File Not Found", JOptionPane.ERROR_MESSAGE);
+            notifyUser("Input JAR does not exist: " + inputPath, "File Not Found", JOptionPane.ERROR_MESSAGE);
             tabbedPane.setSelectedIndex(0);
+            fireSettled();
             return;
         }
         if (outputPath.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select an Output JAR destination.", "Missing Output", JOptionPane.WARNING_MESSAGE);
+            notifyUser("Please select an Output JAR destination.", "Missing Output", JOptionPane.WARNING_MESSAGE);
             tabbedPane.setSelectedIndex(0);
+            fireSettled();
+            return;
+        }
+        if (OutputLocations.sameFile(new File(inputPath), new File(outputPath))) {
+            notifyUser("Refusing to overwrite the input file. Choose an output path under the out folder.",
+                    "Output", JOptionPane.WARNING_MESSAGE);
+            fireSettled();
+            return;
+        }
+        File outputParent = new File(outputPath).getParentFile();
+        if (outputParent != null && !outputParent.exists() && !outputParent.mkdirs()) {
+            notifyUser("Could not create output directory: " + outputParent.getAbsolutePath(),
+                    "Output", JOptionPane.ERROR_MESSAGE);
+            fireSettled();
             return;
         }
         if (activeTransformersModel.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please add at least one transformer to the pipeline.", "No Transformers", JOptionPane.WARNING_MESSAGE);
+            notifyUser("Please add at least one transformer to the pipeline.", "No Transformers", JOptionPane.WARNING_MESSAGE);
             tabbedPane.setSelectedIndex(3);
+            fireSettled();
             return;
         }
 
         // Warn if runtime is empty
         if (runtimePathField.getText().trim().isEmpty()) {
-            int res = JOptionPane.showConfirmDialog(this,
-                    "No Java Runtime path (rt.jar / jmods) is set!\n" +
-                            "Java Deobfuscator requires runtime classes to resolve type hierarchies.\n" +
-                            "Without this, a NoClassInPathException is very likely to occur.\n\n" +
-                            "Would you like to Auto-Detect the runtime now?",
-                    "Missing Runtime Path", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-            if (res == JOptionPane.YES_OPTION) {
-                performAutoDetectRuntime();
-                if (runtimePathField.getText().trim().isEmpty()) {
+            if (quietDialogs) {
+                performAutoDetectRuntimeQuietly();
+            } else {
+                int res = JOptionPane.showConfirmDialog(this,
+                        "No Java Runtime path (rt.jar / jmods) is set!\n" +
+                                "Java Deobfuscator requires runtime classes to resolve type hierarchies.\n" +
+                                "Without this, a NoClassInPathException is very likely to occur.\n\n" +
+                                "Would you like to Auto-Detect the runtime now?",
+                        "Missing Runtime Path", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (res == JOptionPane.YES_OPTION) {
+                    performAutoDetectRuntime();
+                    if (runtimePathField.getText().trim().isEmpty()) {
+                        fireSettled();
+                        return;
+                    }
+                } else if (res == JOptionPane.CANCEL_OPTION) {
+                    fireSettled();
                     return;
                 }
-            } else if (res == JOptionPane.CANCEL_OPTION) {
-                return;
             }
         }
 
@@ -1053,8 +1075,8 @@ public class DeobfuscatorGUI extends JFrame {
             File backup = new File(configuration.getOutput().getParentFile(),
                     configuration.getOutput().getName() + ".bak");
             if (!configuration.getOutput().renameTo(backup)) {
-                JOptionPane.showMessageDialog(this, "Unable to back up the existing output JAR.",
-                        "Output Error", JOptionPane.ERROR_MESSAGE);
+                notifyUser("Unable to back up the existing output JAR.", "Output Error", JOptionPane.ERROR_MESSAGE);
+                fireSettled();
                 return;
             }
         }
@@ -1093,15 +1115,21 @@ public class DeobfuscatorGUI extends JFrame {
                     progressBar.setVisible(false);
                     runBtn.setEnabled(true);
                     stopBtn.setEnabled(false);
-                    statusLabel.setText("Completed in " + (elapsed / 1000.0) + " s");
+                    boolean changed = updateResultView(configuration.getInput(), configuration.getOutput(), null, true);
+                    statusLabel.setText(changed
+                            ? "Completed in " + (elapsed / 1000.0) + " s"
+                            : "Finished with no bytecode change");
                     appendConsole("\n==================================");
-                    appendConsole("✓ Deobfuscation finished successfully in " + (elapsed / 1000.0) + " seconds!");
+                    appendConsole(changed
+                            ? "Engine finished in " + (elapsed / 1000.0) + " seconds and the bytecode changed."
+                            : "Engine finished in " + (elapsed / 1000.0) + " seconds but the bytecode matches the input. Not deobfuscated.");
                     appendConsole("Output saved to: " + configuration.getOutput().getAbsolutePath());
                     appendConsole("==================================");
-
-                    JOptionPane.showMessageDialog(this,
-                            "Deobfuscation finished successfully!\nSaved to:\n" + configuration.getOutput().getAbsolutePath(),
+                    notifyUser(changed
+                                    ? "The Java engine finished and the bytecode changed.\nSaved to:\n" + configuration.getOutput().getAbsolutePath()
+                                    : "The Java engine finished, but the bytecode matches the input. Not deobfuscated.\nOutput:\n" + configuration.getOutput().getAbsolutePath(),
                             "Complete", JOptionPane.INFORMATION_MESSAGE);
+                    fireSettled();
                 });
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
@@ -1112,6 +1140,8 @@ public class DeobfuscatorGUI extends JFrame {
                     stopBtn.setEnabled(false);
                     statusLabel.setText("Cancelled");
                     appendConsole("\n[WARNING] Deobfuscation was cancelled by user.");
+                    updateResultView(configuration.getInput(), configuration.getOutput(), "Cancelled before completion.", true);
+                    fireSettled();
                 });
             } catch (NoClassInPathException ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -1125,13 +1155,14 @@ public class DeobfuscatorGUI extends JFrame {
                     appendConsole("To resolve this:\n" +
                             " 1. Go to 'Variables & Secrets' tab and ensure Java Runtime (rt.jar / jmods) is set.\n" +
                             " 2. If '" + ex.getClassName() + "' is from a library used by the app, add that library in the 'Classpath & Libs' tab.\n");
-
-                    JOptionPane.showMessageDialog(this,
-                            "Could not locate class: " + ex.getClassName() + "\n\n" +
+                    updateResultView(configuration.getInput(), configuration.getOutput(),
+                            "Could not locate class: " + ex.getClassName(), true);
+                    notifyUser("Could not locate class: " + ex.getClassName() + "\n\n" +
                                     "Please ensure:\n" +
                                     "1. The Java Runtime (rt.jar / jmods) is set in the 'Variables & Secrets' tab.\n" +
                                     "2. Any third-party dependency JARs are added in the 'Classpath & Libs' tab.",
                             "Class Missing in Path", JOptionPane.ERROR_MESSAGE);
+                    fireSettled();
                 });
             } catch (PreventableStackOverflowError ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -1142,12 +1173,12 @@ public class DeobfuscatorGUI extends JFrame {
                     statusLabel.setText("Failed: StackOverflowError");
                     appendConsole("\n[ERROR] PreventableStackOverflowError: Recursion depth exceeded.");
                     appendConsole("Run the app with '-Xss128m' to increase thread stack size.");
-
-                    JOptionPane.showMessageDialog(this,
-                            "StackOverflowError occurred during deobfuscation.\n" +
+                    updateResultView(configuration.getInput(), configuration.getOutput(), "StackOverflowError", true);
+                    notifyUser("StackOverflowError occurred during deobfuscation.\n" +
                                     "Please relaunch with '-Xss128m' stack allocation.\n" +
                                     "(Use run.sh or run.bat which configures this automatically).",
                             "Stack Overflow", JOptionPane.ERROR_MESSAGE);
+                    fireSettled();
                 });
             } catch (Throwable t) {
                 SwingUtilities.invokeLater(() -> {
@@ -1160,10 +1191,9 @@ public class DeobfuscatorGUI extends JFrame {
                     StringWriter sw = new StringWriter();
                     t.printStackTrace(new PrintWriter(sw));
                     appendConsole(sw.toString());
-
-                    JOptionPane.showMessageDialog(this,
-                            "Deobfuscation failed:\n" + t.getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    updateResultView(configuration.getInput(), configuration.getOutput(), t.getMessage(), true);
+                    notifyUser("Deobfuscation failed:\n" + t.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    fireSettled();
                 });
             }
         }, "Deobfuscator-Worker-Thread");
@@ -1523,9 +1553,159 @@ public class DeobfuscatorGUI extends JFrame {
     }
 
     public static void launch() {
-        SwingUtilities.invokeLater(() -> {
-            DeobfuscatorGUI gui = new DeobfuscatorGUI();
-            gui.setVisible(true);
-        });
+        com.javadeobfuscator.deobfuscator.ui.universal.UniversalDeobfuscatorFrame.launch();
+    }
+
+    /**
+     * Called when the front door routes a Java file here. A raw class file is
+     * packed into a new jar under out/ so the existing engine can read it.
+     */
+    public void acceptRoutedFile(File input, FileTypeDetection detection) {
+        quietDialogs = true;
+        routedTypeSummary = detection.getType().getDisplayName() + " — " + detection.getSummary();
+        obfuscatorGuess = "not scanned";
+        appendConsole("Routed file: " + input.getAbsolutePath());
+        appendConsole(detection.explain());
+        File engineInput = input;
+        try {
+            if (ClassFilePackager.looksLikeClass(input)) {
+                engineInput = ClassFilePackager.packageAsJar(input);
+                appendConsole("Packed the class file into " + engineInput.getAbsolutePath() + " without modifying the original.");
+            }
+        } catch (IOException ex) {
+            notifyUser("Could not prepare the Java input: " + ex.getMessage(), "Input", JOptionPane.ERROR_MESSAGE);
+            updateResultView(input, null, ex.getMessage(), false);
+            fireSettled();
+            return;
+        }
+        inputJarField.setText(engineInput.getAbsolutePath());
+        outputJarField.setText(OutputLocations.jarOutput(engineInput).getAbsolutePath());
+        if (activeTransformersModel.isEmpty()) {
+            applyPreset("Peephole Cleanup & Optimization");
+            presetCombo.setSelectedItem("Peephole Cleanup & Optimization");
+            obfuscatorGuess = "not scanned; peephole cleanup preset applied";
+        }
+        performAutoDetectRuntimeQuietly();
+        tabbedPane.setSelectedIndex(0);
+        startDeobfuscation();
+    }
+
+    public void setRunSettledCallback(Runnable callback) {
+        this.runSettledCallback = callback;
+    }
+
+    public String getResultStatusText() {
+        return resultStatusArea == null ? "" : resultStatusArea.getText();
+    }
+
+    private JPanel createResultTab() {
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
+        panel.setBorder(new EmptyBorder(12, 12, 12, 12));
+        resultStatusArea = new JTextArea(6, 40);
+        resultStatusArea.setEditable(false);
+        resultStatusArea.setLineWrap(true);
+        resultStatusArea.setWrapStyleWord(true);
+        resultStatusArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        resultStatusArea.setText("No Java run yet.");
+        JScrollPane statusScroll = new JScrollPane(resultStatusArea);
+        statusScroll.setBorder(BorderFactory.createTitledBorder("Status"));
+
+        originalViewArea = new JTextArea();
+        originalViewArea.setEditable(false);
+        originalViewArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        transformedViewArea = new JTextArea();
+        transformedViewArea.setEditable(false);
+        transformedViewArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        JScrollPane left = new JScrollPane(originalViewArea);
+        left.setBorder(BorderFactory.createTitledBorder("Original bytecode"));
+        JScrollPane right = new JScrollPane(transformedViewArea);
+        right.setBorder(BorderFactory.createTitledBorder("Result bytecode"));
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right);
+        split.setResizeWeight(0.5);
+
+        panel.add(statusScroll, BorderLayout.NORTH);
+        panel.add(split, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private boolean updateResultView(File input, File output, String failure, boolean toolRan) {
+        String original = "";
+        String transformed = "";
+        boolean changed = false;
+        try {
+            if (input != null && input.isFile()) {
+                original = BytecodeDump.dump(input);
+            }
+        } catch (IOException ex) {
+            original = "Could not read input: " + ex.getMessage();
+        }
+        boolean wroteOutput = output != null && output.isFile();
+        if (failure == null && wroteOutput) {
+            try {
+                transformed = BytecodeDump.dump(output);
+                changed = !BytecodeDump.sameBytecode(original, transformed);
+            } catch (IOException ex) {
+                failure = ex.getMessage();
+                transformed = "Could not read output: " + ex.getMessage();
+            }
+        } else if (failure != null) {
+            transformed = "No deobfuscated view.\n" + failure;
+        } else {
+            failure = "No output file was written.";
+            transformed = failure;
+        }
+        if (originalViewArea != null) {
+            originalViewArea.setText(original);
+            originalViewArea.setCaretPosition(0);
+            transformedViewArea.setText(transformed);
+            transformedViewArea.setCaretPosition(0);
+        }
+        JobStatus status = new JobStatus(
+                routedTypeSummary.isEmpty() ? "Java" : routedTypeSummary,
+                obfuscatorGuess,
+                "built-in Java deobfuscator (" + describeActiveTools() + ")",
+                toolRan,
+                toolRan && failure == null,
+                changed,
+                wroteOutput ? output : null,
+                failure == null ? "" : failure
+        );
+        if (resultStatusArea != null) {
+            resultStatusArea.setText(status.toDisplayString());
+            resultStatusArea.setCaretPosition(0);
+        }
+        if (quietDialogs && tabbedPane != null) {
+            tabbedPane.setSelectedIndex(5);
+        }
+        return changed;
+    }
+
+    private String describeActiveTools() {
+        if (activeTransformersModel == null || activeTransformersModel.isEmpty()) {
+            return "no transformers";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < activeTransformersModel.getSize(); i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(activeTransformersModel.getElementAt(i).getId());
+        }
+        return sb.toString();
+    }
+
+    private void notifyUser(String message, String title, int type) {
+        appendConsole("[" + title + "] " + message.replace('\n', ' '));
+        if (!quietDialogs) {
+            JOptionPane.showMessageDialog(this, message, title, type);
+        }
+    }
+
+    private void fireSettled() {
+        Runnable callback = runSettledCallback;
+        quietDialogs = false;
+        if (callback != null) {
+            callback.run();
+        }
     }
 }

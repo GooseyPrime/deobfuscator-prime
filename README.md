@@ -4,7 +4,7 @@
 [![Java](https://img.shields.io/badge/Java-8%20--%2021%2B-orange.svg)](https://adoptium.net/)
 [![ASM](https://img.shields.io/badge/ASM-9.7.1-brightgreen.svg)](https://ow2.org/)
 
-An easy-to-install, modern, and powerful Java bytecode deobfuscation suite. This tool recovers clean bytecode from commercial and open-source Java obfuscators including **Zelix KlassMaster**, **Allatori**, **Stringer**, **Dash-O**, **Radon**, **DexGuard**, **Smoke**, and **SkidSuite**.
+An easy-to-install, modern, and powerful Java bytecode deobfuscation suite, with a universal front door for other file types. The Java engine recovers clean bytecode from commercial and open-source Java obfuscators including **Zelix KlassMaster**, **Allatori**, **Stringer**, **Dash-O**, **Radon**, **DexGuard**, **Smoke**, and **SkidSuite**. JavaScript, .NET, and Android files are handed to optional external tools when those tools are installed. They are not bundled, and a file is never described as deobfuscated unless a tool actually ran and changed the output.
 
 ---
 
@@ -12,7 +12,8 @@ An easy-to-install, modern, and powerful Java bytecode deobfuscation suite. This
 
 * **Modern JDK & ASM 9.7.1 Compatibility**: Upgraded to OW2 ASM 9.7.1. Fully supports Java 8 bytecode up to modern Java (Java 9, 11, 17, 21+).
 * **Native JMOD Runtime Support**: Full support for JDK 9+ `.jmod` modular runtimes (e.g., `java.base.jmod`), eliminating the old requirement of needing a legacy Java 8 `rt.jar`.
-* **Integrated Graphical User Interface (GUI)**: Built-in Swing GUI with tabbed navigation, pipeline builder, live console logger, and 1-click presets.
+* **Universal front door**: Drop or browse to a file. Magic bytes are checked first, then the extension. Java, JavaScript, .NET, Android, and unknown files each open on their own tab.
+* **Integrated Graphical User Interface (GUI)**: The Java tab is the existing Swing UI (pipeline builder, live console, presets, result bytecode view). Other tabs call optional external tools on a background thread.
 * **Auto-Detection Engine**: Automatically scans input JARs against bytecode signature rules and recommends the exact transformer pipeline.
 * **Dedicated Variables & Secrets Manager**: UI entry fields with one-click auto-detection for Java runtime standard libraries, remapping dictionaries, and obfuscator flags.
 * **Turnkey Launch Scripts**: Pre-configured `run.sh` (Linux/macOS) and `run.bat` (Windows) scripts with required JVM stack (`-Xss128m`) and memory options.
@@ -117,9 +118,48 @@ Java Deobfuscator requires specific runtime files and parameters depending on yo
 
 ---
 
+## Universal front door
+
+Launch the GUI with `./run.sh`, `run.bat`, or:
+
+```bash
+java -Xss128m -Xmx2G -jar target/deobfuscator-1.0.0.jar
+```
+
+The first tab is a drop target plus a Browse button. Detection order:
+
+1. Magic bytes (`CA FE BA BE` class, `dex\n` DEX, `MZ` plus a CLR data directory, ZIP containers).
+2. Filename extension, only when the bytes are ambiguous or have no recognized magic.
+
+| Detected type | How it is recognized | What the tab does |
+| :--- | :--- | :--- |
+| Java | Class magic, or a ZIP/JAR/WAR (`.jar`, `.class`, `.war`) | Existing Java deobfuscator. A lone `.class` is packed into a new jar under `out/` first. |
+| JavaScript | `.js` or `.mjs`, and no stronger magic | `webcrack` (preferred) or `synchrony`, via a local binary or `npx` |
+| .NET | PE file whose CLR runtime directory is present | `de4dot` |
+| Android | DEX magic, or a ZIP with `AndroidManifest.xml` / `classes.dex`, or `.apk` | `jadx` (preferred) or `apktool` |
+| Unknown | Anything else, including a PE without a CLR header | Reported on the Unknown tab. Not processed. |
+
+Outputs are written under `./out` and are never the input path. If a tool is missing, its tab says which command is missing and how to install it, and Run stays disabled. `npx --yes webcrack` is offered as a manual Run because it may download a package; dropping a `.js` file does not start that download. A finished run that does not change the input is reported as not deobfuscated.
+
+Each non-Java tab has a path field. Paths are remembered in `~/.deobfuscator-prime/tool-paths.properties`. Detect also searches `PATH`. Work runs off the Swing thread. Progress and errors go to the log pane. Text results are shown beside the original; Java shows a bytecode dump of the input and the output jar.
+
+### Optional external tools
+
+These are not required to build or to deobfuscate Java.
+
+| Tool | Type | Install |
+| :--- | :--- | :--- |
+| webcrack | JavaScript | Install Node.js, then `npm install -g webcrack`. Command: `webcrack <file> -o <directory>` |
+| synchrony | JavaScript | `npm install -g synchrony`. Command: `synchrony <file> -o <output.js>` |
+| de4dot | .NET | https://github.com/de4dot/de4dot/releases . On Linux/macOS a `de4dot.exe` build also needs `mono`. Command: `de4dot <assembly> -o <output>` |
+| jadx | Android | https://github.com/skylot/jadx/releases or `sudo apt install jadx`. Command: `jadx -d <directory> <apk-or-dex>` |
+| apktool | Android | https://apktool.org/docs/install or `sudo apt install apktool`. Command: `apktool d -f -o <directory> <apk>` |
+
+Made-up fixtures live in `samples/test-resources/` (a padded class jar, a tiny string-table script, a synthetic PE, a fake apk, and an unknown blob). They are not real protected programs.
+
 ## Graphical User Interface (GUI) Guide
 
-Launch the GUI by running `./run.sh` or `java -Xss128m -jar target/deobfuscator-1.0.0.jar`.
+Launch the GUI by running `./run.sh` or `java -Xss128m -jar target/deobfuscator-1.0.0.jar`. The window opens on the front page. The Java tab is the workflow below.
 
 ```
 +--------------------------------------------------------------------------------+
@@ -142,7 +182,9 @@ Launch the GUI by running `./run.sh` or `java -Xss128m -jar target/deobfuscator-
 ```
 
 ### Steps to Deobfuscate via GUI:
-1. **Select Target JAR**: On the **Target Files & Quick Start** tab, browse for your **Input JAR** and set the **Output JAR** destination.
+Dropping a jar, war, or class file on the front page opens this Java tab, sets the output under `out/`, and runs the pipeline. If the pipeline is empty, the peephole cleanup preset is applied. You can also drive the same screen by hand:
+
+1. **Select Target JAR**: On the **Target Files** tab, browse for your **Input JAR**. The output path defaults to `out/<name>-deobfuscated.jar`.
 2. **Auto-Detect Obfuscators**: Click **Run Obfuscator Detection**. The app scans the bytecode against detection rules and prompts to automatically configure the recommended transformer pipeline.
 3. **Verify Runtime**: On the **Variables & Secrets** tab, ensure the Java Runtime Library path is filled in (click **Auto-Detect** if needed).
 4. **Customize Pipeline**:
@@ -150,7 +192,7 @@ Launch the GUI by running `./run.sh` or `java -Xss128m -jar target/deobfuscator-
    - Use **Add to Pipeline >>**, **Move Up**, **Move Down**, or **Remove** to customize the sequence.
    - Or pick a ready-made profile from the **Quick Preset** dropdown (Allatori, Zelix KlassMaster, Stringer, Dash-O, Radon, General Cleanup).
 5. **Add Dependencies** *(if necessary)*: On the **Classpath & Dependencies** tab, add any external library JARs your application depends on.
-6. **Execute**: Click **▶ Run Deobfuscator**. Switch to the **Live Console Log** tab to view progress and bytecode transformations in real time.
+6. **Execute**: Click **Run Deobfuscator**. The **Console Log** tab shows progress. The **Result** tab shows the status (detected type, obfuscator guess, transformers, whether the bytecode changed) and a side-by-side bytecode dump. A run that does not change the bytecode is not reported as deobfuscated.
 
 ---
 

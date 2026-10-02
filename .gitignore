@@ -5,7 +5,9 @@
 /src/test/resources/testcases/*.class
 /sn/
 /libraries/
-/samples/
+/samples/*
+!/samples/test-resources/
+!/samples/test-resources/**
 /issues/
 .classpath
 .project
@@ -15,6 +17,7 @@ deobfuscator.iml
 *.iml
 *.jar
 !lib/**/*.jar
+!samples/test-resources/**/*.jar
 *.txt
 *.ser
 *.DS_Store

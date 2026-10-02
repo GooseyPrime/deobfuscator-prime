@@ -203,6 +203,7 @@ public class DeobfuscatorMain {
         System.out.println("     java -jar deobfuscator.jar");
         System.out.println("     java -jar deobfuscator.jar --gui");
         System.out.println("     ./run.sh (Linux/macOS) or run.bat (Windows)");
+        System.out.println("     The GUI opens a universal front door (Java, JavaScript, .NET, Android, Unknown).");
         System.out.println();
         System.out.println("  2. Command Line Interface (CLI):");
         System.out.println("     java -Xss128m -jar deobfuscator.jar --config config.yaml");
